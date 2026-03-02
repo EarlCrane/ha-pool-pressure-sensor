@@ -12,6 +12,8 @@ Pool filters need to be backwashed when the pressure rises 8–10 PSI above the 
 
 I started with an ESP32 I was already using as a BLE proxy, stripped out Bluetooth, added an ADS1115 I²C ADC, and wired in a screw-in pressure transducer at the filter outlet. The ADS1115 gives cleaner, more stable readings than the ESP32's built-in ADC, and lets me safely interface a 5V sensor signal with 3.3V logic using a simple resistor voltage divider.
 
+This is also the first time I've ever really pulled together an ESP32 and breadboard project for something I couldn't find online (at any reasonable price). I would not have been able to do this without OpenAI and Anthropic (using each for skills where they are better). So consider this also my disclaimer that I didn't write any of this code, wow this is an amazing world we are going into. 
+
 ---
 
 ## Features
