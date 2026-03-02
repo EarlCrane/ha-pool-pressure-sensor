@@ -1,0 +1,104 @@
+# Pool Pressure Sensor — Standalone Example
+# ESP32 DevKit V1 + ADS1115 + 0-60 PSI Pressure Transducer
+#
+# 1. Copy this file to your ESPHome config directory
+# 2. Create a secrets.yaml (see secrets.yaml.example) with your credentials
+# 3. Adjust the divider_ratio substitution if you used different resistor values
+# 4. Flash via USB first, then OTA works for future updates
+
+substitutions:
+  device_name: "pool-pressure-sensor"
+  friendly_name: "Pool Pressure Sensor"
+  # Voltage divider ratio: Rbottom / (Rtop + Rbottom)
+  # Default build: 10kΩ top + 26.7kΩ (22kΩ + 4.7kΩ) bottom = 0.727
+  # Recalculate if you used different resistors.
+  divider_ratio: "0.727"
+  update_interval: "2s"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret ha_api_key   # Generate: openssl rand -base64 32
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  fast_connect: true
+  # Optional static IP — uncomment and set your own values
+  # manual_ip:
+  #   static_ip: 192.168.x.x
+  #   gateway: 192.168.x.1
+  #   subnet: 255.255.255.0
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# -------------------------
+# I2C Bus (ESP32 default pins)
+# -------------------------
+i2c:
+  sda: 21
+  scl: 22
+  scan: true
+
+# -------------------------
+# ADS1115 16-bit ADC
+# -------------------------
+ads1115:
+  - id: ads_hub
+    address: 0x48
+    continuous_mode: true
+
+sensor:
+  # Raw ADC voltage — kept internal, used by PSI template below
+  - platform: ads1115
+    ads1115_id: ads_hub
+    multiplexer: A0_GND
+    gain: 4.096
+    update_interval: ${update_interval}
+    name: "${friendly_name} ADC Volts"
+    unit_of_measurement: "V"
+    id: pool_adc_v
+    internal: true
+
+  # Converted PSI published to Home Assistant
+  - platform: template
+    name: "${friendly_name}"
+    unit_of_measurement: "psi"
+    icon: "mdi:gauge"
+    accuracy_decimals: 1
+    update_interval: ${update_interval}
+    lambda: |-
+      float v_adc = id(pool_adc_v).state;
+      float divider = ${divider_ratio};  // Rbottom / (Rtop + Rbottom)
+      float v_sensor = v_adc / divider;  // Undo voltage divider
+      float psi = (v_sensor - 0.5) * 15.0;  // Sensor: 0.5V=0psi, slope=15psi/V
+      if (psi < 0) psi = 0;
+      return psi;
+
+# -------------------------
+# Recovery Buttons
+# -------------------------
+button:
+  - platform: safe_mode
+    name: "${friendly_name} Safe Mode"
+
+  - platform: factory_reset
+    name: "${friendly_name} Factory Reset"

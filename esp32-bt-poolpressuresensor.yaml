@@ -1,0 +1,92 @@
+esphome:
+  name: "pool-pressure-sensor"
+  friendly_name: Pool Pressure Sensor
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# Logging
+logger:
+
+# Home Assistant API
+api:
+  encryption:
+    key: !secret ha_api_key   # Generate: openssl rand -base64 32
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Optional: assign a static IP on your LAN (change to your own subnet)
+  # manual_ip:
+  #   static_ip: 192.168.x.x
+  #   gateway: 192.168.x.1
+  #   subnet: 255.255.255.0
+
+  power_save_mode: none
+  fast_connect: true
+
+  ap:
+    ssid: "Pool Pressure Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# -------------------------
+# I2C Bus
+# -------------------------
+i2c:
+  sda: 21
+  scl: 22
+  scan: true
+
+# -------------------------
+# ADS1115 Hub
+# -------------------------
+ads1115:
+  - id: ads_hub
+    address: 0x48
+    continuous_mode: true
+
+sensor:
+  - platform: ads1115
+    ads1115_id: ads_hub
+    multiplexer: A0_GND
+    gain: 4.096
+    update_interval: 2s
+    name: "Pool Pressure ADC Volts"
+    unit_of_measurement: "V"
+    id: pool_adc_v
+    internal: true
+
+  - platform: template
+    name: "Pool Filter Pressure"
+    unit_of_measurement: "psi"
+    accuracy_decimals: 1
+    update_interval: 2s
+    lambda: |-
+      float v_adc = id(pool_adc_v).state;
+      float divider = 0.727;  // Rbottom / (Rtop + Rbottom) = 26.7k / (10k + 26.7k)
+      float v_sensor = v_adc / divider;
+      float psi = (v_sensor - 0.5) * 15.0;
+      if (psi < 0) psi = 0;
+      return psi;
+
+# -------------------------
+# Recovery Buttons
+# -------------------------
+button:
+  - platform: safe_mode
+    id: button_safe_mode
+    name: Safe Mode Boot
+
+  - platform: factory_reset
+    id: factory_reset_btn
+    name: Factory Reset

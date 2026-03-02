@@ -1,0 +1,60 @@
+# ESPHome Package: Pool Filter Pressure Sensor
+#
+# Reads a ratiometric 0–60 PSI pressure transducer via ADS1115 I²C ADC
+# and publishes PSI to Home Assistant.
+#
+# Import into your node config:
+#   packages:
+#     pool_pressure: github://earlcrane/ha-pool-pressure-sensor/esphome/pool_pressure_sensor.yaml@main
+#
+# Override any substitution in your node config to customize behavior.
+# See README for wiring details and calibration notes.
+
+substitutions:
+  # Name shown in Home Assistant
+  pool_sensor_name: "Pool Filter Pressure"
+  # Internal raw ADC sensor name (set internal: true in production)
+  pool_adc_name: "Pool Pressure ADC Volts"
+  # Voltage divider ratio: Rbottom / (Rtop + Rbottom)
+  # Default: 10kΩ top + 26.7kΩ bottom (22kΩ + 4.7kΩ in series)
+  pool_divider_ratio: "0.727"
+  # How often to read and publish
+  pool_update_interval: "2s"
+  # I²C GPIO pins (ESP32 default)
+  pool_i2c_sda: "21"
+  pool_i2c_scl: "22"
+
+i2c:
+  sda: ${pool_i2c_sda}
+  scl: ${pool_i2c_scl}
+  scan: true
+
+ads1115:
+  - id: pool_ads_hub
+    address: 0x48
+    continuous_mode: true
+
+sensor:
+  - platform: ads1115
+    ads1115_id: pool_ads_hub
+    multiplexer: A0_GND
+    gain: 4.096
+    update_interval: ${pool_update_interval}
+    name: ${pool_adc_name}
+    unit_of_measurement: "V"
+    id: pool_adc_v
+    internal: true
+
+  - platform: template
+    name: ${pool_sensor_name}
+    unit_of_measurement: "psi"
+    icon: "mdi:gauge"
+    accuracy_decimals: 1
+    update_interval: ${pool_update_interval}
+    lambda: |-
+      float v_adc = id(pool_adc_v).state;
+      float divider = ${pool_divider_ratio};
+      float v_sensor = v_adc / divider;
+      float psi = (v_sensor - 0.5) * 15.0;
+      if (psi < 0) psi = 0;
+      return psi;

@@ -1,0 +1,15 @@
+# ESPHome build artifacts
+*.elf
+*.bin
+.esphome/
+build/
+
+# Secrets — never commit these
+secrets.yaml
+
+# Logs
+*.log
+*.txt
+
+# macOS
+.DS_Store
