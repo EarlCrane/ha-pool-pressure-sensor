@@ -34,16 +34,12 @@ I started with an ESP32 I was already using as a BLE proxy, stripped out Bluetoo
 | ESP32 DevKit V1 | 38-pin, micro-USB | [Amazon](https://www.amazon.com/s?k=esp32+devkit+v1+38+pin) |
 | ADS1115 Breakout | 16-bit I²C ADC, 4-channel | [Amazon](https://www.amazon.com/s?k=ads1115+i2c+adc+breakout) |
 | Pressure Transducer | 0–60 PSI, 5–12V supply, 0.5–4.5V output, 1/8" NPT, 3-wire | [Amazon](https://www.amazon.com/s?k=0-60+psi+pressure+transducer+0.5-4.5v+1%2F8+npt) |
-| 10kΩ Resistor | Voltage divider top resistor | [Amazon](https://www.amazon.com/s?k=10k+ohm+resistor+1%25) |
-| 22kΩ Resistor | Voltage divider bottom (part 1) | [Amazon](https://www.amazon.com/s?k=22k+ohm+resistor) |
-| 4.7kΩ Resistor | Voltage divider bottom (part 2, 22k+4.7k ≈ 27k) | [Amazon](https://www.amazon.com/s?k=4.7k+ohm+resistor) |
-| Wago 221-413 Lever Nuts | Optional — clean wire connections for sensor leads | [Amazon](https://www.amazon.com/s?k=wago+221-413+lever+nuts) |
+| Resistor Kit | Resister kit if you don't have one already | [DigiKey](https://www.digikey.com/en/products/detail/sparkfun-electronics/10969/14671649) |
 | Breadboard | Full or half size | [Amazon](https://www.amazon.com/s?k=breadboard+830+point) |
 | Jumper Wires | Male-to-male and male-to-female | [Amazon](https://www.amazon.com/s?k=breadboard+jumper+wires+kit) |
 
 **Total cost:** ~$20–30 USD depending on what you already have.
 
-> **Tip on resistors:** You can substitute a single 27kΩ resistor for the 22k+4.7k combination. Update the `divider_ratio` substitution accordingly: `27 / (10 + 27) = 0.730`.
 
 ---
 
