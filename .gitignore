@@ -3,6 +3,7 @@
 *.bin
 .esphome/
 build/
+.claude
 
 # Secrets — never commit these
 secrets.yaml
