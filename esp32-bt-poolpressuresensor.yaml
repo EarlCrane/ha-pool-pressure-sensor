@@ -66,11 +66,13 @@ sensor:
     id: pool_adc_v
     internal: true
 
+  # Real-time: updates HA every 2s. Exclude this from the HA recorder.
   - platform: template
     name: "Pool Filter Pressure"
     unit_of_measurement: "psi"
     accuracy_decimals: 1
     update_interval: 2s
+    id: pool_filter_psi
     lambda: |-
       float v_adc = id(pool_adc_v).state;
       float divider = 0.727;  // Rbottom / (Rtop + Rbottom) = 26.7k / (10k + 26.7k)
@@ -78,6 +80,18 @@ sensor:
       float psi = (v_sensor - 0.5) * 15.0;
       if (psi < 0) psi = 0;
       return psi;
+
+  # History: samples every 2s, averages and pushes to HA every 60s.
+  # Record this one; exclude Pool Filter Pressure above from the HA recorder.
+  - platform: template
+    name: "Pool Filter Pressure History"
+    unit_of_measurement: "psi"
+    accuracy_decimals: 1
+    update_interval: 2s
+    filters:
+      - throttle_average: 60s
+    lambda: |-
+      return id(pool_filter_psi).state;
 
 # -------------------------
 # Recovery Buttons

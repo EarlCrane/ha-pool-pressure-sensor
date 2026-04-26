@@ -11,15 +11,19 @@
 # See README for wiring details and calibration notes.
 
 substitutions:
-  # Name shown in Home Assistant
+  # Name shown in Home Assistant (real-time, 2s — exclude from HA recorder)
   pool_sensor_name: "Pool Filter Pressure"
+  # History sensor name (60s throttle_average — record this one)
+  pool_history_sensor_name: "Pool Filter Pressure History"
   # Internal raw ADC sensor name (set internal: true in production)
   pool_adc_name: "Pool Pressure ADC Volts"
   # Voltage divider ratio: Rbottom / (Rtop + Rbottom)
   # Default: 10kΩ top + 26.7kΩ bottom (22kΩ + 4.7kΩ in series)
   pool_divider_ratio: "0.727"
-  # How often to read and publish
+  # How often to read and publish (real-time sensor)
   pool_update_interval: "2s"
+  # How often the history sensor pushes to HA (throttle_average window)
+  pool_history_interval: "60s"
   # I²C GPIO pins (ESP32 default)
   pool_i2c_sda: "21"
   pool_i2c_scl: "22"
@@ -45,12 +49,14 @@ sensor:
     id: pool_adc_v
     internal: true
 
+  # Real-time: updates HA every pool_update_interval. Exclude from HA recorder.
   - platform: template
     name: ${pool_sensor_name}
     unit_of_measurement: "psi"
     icon: "mdi:gauge"
     accuracy_decimals: 1
     update_interval: ${pool_update_interval}
+    id: pool_filter_psi
     lambda: |-
       float v_adc = id(pool_adc_v).state;
       float divider = ${pool_divider_ratio};
@@ -58,3 +64,16 @@ sensor:
       float psi = (v_sensor - 0.5) * 15.0;
       if (psi < 0) psi = 0;
       return psi;
+
+  # History: samples at pool_update_interval, averages and pushes every pool_history_interval.
+  # Record this one in HA; exclude the real-time sensor above.
+  - platform: template
+    name: ${pool_history_sensor_name}
+    unit_of_measurement: "psi"
+    icon: "mdi:gauge"
+    accuracy_decimals: 1
+    update_interval: ${pool_update_interval}
+    filters:
+      - throttle_average: ${pool_history_interval}
+    lambda: |-
+      return id(pool_filter_psi).state;
