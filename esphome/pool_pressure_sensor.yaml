@@ -24,6 +24,10 @@ substitutions:
   pool_update_interval: "2s"
   # How often the history sensor pushes to HA (throttle_average window)
   pool_history_interval: "60s"
+  # A marked bump must observe pump-off pressure before accepting a restart.
+  pool_offline_threshold: "2.0"
+  # Minimum PSI reduction required to recognize the post-bump restart.
+  pool_minimum_bump_drop: "0.5"
   # I²C GPIO pins (ESP32 default)
   pool_i2c_sda: "21"
   pool_i2c_scl: "22"
@@ -37,6 +41,86 @@ ads1115:
   - id: pool_ads_hub
     address: 0x48
     continuous_mode: true
+
+# Home Assistant is the preferred ESPHome clock source. Epoch timestamps let
+# filter-cycle analytics survive an ESP32 restart without storing pressure logs
+# on the device.
+time:
+  - platform: homeassistant
+    id: pool_ha_time
+
+globals:
+  # State: 0 normal, 1 awaiting pump-off, 2 awaiting restart, 3 recovering.
+  - id: pool_recovery_state
+    type: int
+    restore_value: true
+    update_interval: 1min
+    initial_value: "0"
+  - id: pool_bump_count_value
+    type: int
+    restore_value: true
+    update_interval: 1min
+    initial_value: "0"
+  - id: pool_cycle_started_epoch
+    type: uint32_t
+    restore_value: true
+    update_interval: 1min
+    initial_value: "0"
+  - id: pool_recovery_started_epoch
+    type: uint32_t
+    restore_value: true
+    update_interval: 1min
+    initial_value: "0"
+  - id: pool_pressure_before_value
+    type: float
+    restore_value: true
+    update_interval: 1min
+    initial_value: "-1.0"
+  - id: pool_pressure_after_value
+    type: float
+    restore_value: true
+    update_interval: 1min
+    initial_value: "-1.0"
+  - id: pool_last_recovery_hours_value
+    type: float
+    restore_value: true
+    update_interval: 1min
+    initial_value: "-1.0"
+  - id: pool_tau_hours_value
+    type: float
+    restore_value: true
+    update_interval: 15min
+    initial_value: "-1.0"
+  - id: pool_fit_quality_value
+    type: float
+    restore_value: true
+    update_interval: 15min
+    initial_value: "-1.0"
+  - id: pool_fit_count
+    type: int
+    restore_value: true
+    update_interval: 15min
+    initial_value: "0"
+  - id: pool_fit_sum_t2
+    type: double
+    restore_value: true
+    update_interval: 15min
+    initial_value: "0.0"
+  - id: pool_fit_sum_ty
+    type: double
+    restore_value: true
+    update_interval: 15min
+    initial_value: "0.0"
+  - id: pool_fit_sum_y
+    type: double
+    restore_value: true
+    update_interval: 15min
+    initial_value: "0.0"
+  - id: pool_fit_sum_y2
+    type: double
+    restore_value: true
+    update_interval: 15min
+    initial_value: "0.0"
 
 sensor:
   - platform: ads1115
@@ -70,6 +154,8 @@ sensor:
   - platform: template
     name: ${pool_history_sensor_name}
     unit_of_measurement: "psi"
+    device_class: pressure
+    state_class: measurement
     icon: "mdi:gauge"
     accuracy_decimals: 1
     update_interval: ${pool_update_interval}
@@ -77,3 +163,266 @@ sensor:
       - throttle_average: ${pool_history_interval}
     lambda: |-
       return id(pool_filter_psi).state;
+    on_value:
+      then:
+        - lambda: |-
+            if (!std::isfinite(x) || x < 0.0f) return;
+
+            auto now = id(pool_ha_time).now();
+            if (!now.is_valid()) return;
+            const uint32_t epoch = static_cast<uint32_t>(now.timestamp);
+
+            if (id(pool_cycle_started_epoch) == 0) {
+              id(pool_cycle_started_epoch) = epoch;
+            }
+
+            if (id(pool_recovery_state) == 1) {
+              if (x <= ${pool_offline_threshold}) {
+                id(pool_recovery_state) = 2;
+              }
+              return;
+            }
+
+            if (id(pool_recovery_state) == 2) {
+              if (x > ${pool_offline_threshold} &&
+                  id(pool_pressure_before_value) >= 0.0f &&
+                  x <= id(pool_pressure_before_value) - ${pool_minimum_bump_drop}) {
+                id(pool_recovery_state) = 3;
+                id(pool_pressure_after_value) = x;
+                id(pool_recovery_started_epoch) = epoch;
+              }
+              return;
+            }
+
+            if (id(pool_recovery_state) != 3 ||
+                id(pool_recovery_started_epoch) == 0 ||
+                id(pool_pressure_before_value) < 0.0f ||
+                id(pool_pressure_after_value) < 0.0f) {
+              return;
+            }
+
+            const float elapsed_hours =
+                static_cast<float>(epoch - id(pool_recovery_started_epoch)) / 3600.0f;
+            const float span =
+                id(pool_pressure_before_value) - id(pool_pressure_after_value);
+            const float remaining = id(pool_pressure_before_value) - x;
+
+            // Fit ln(remaining/span) = -t/tau incrementally, so the ESP32
+            // needs only a few running sums instead of an in-memory log.
+            if (elapsed_hours > 0.0f && span > 0.0f &&
+                remaining > 0.0f && remaining < span) {
+              const double t = elapsed_hours;
+              const double y = log(static_cast<double>(remaining / span));
+              id(pool_fit_count) += 1;
+              id(pool_fit_sum_t2) += t * t;
+              id(pool_fit_sum_ty) += t * y;
+              id(pool_fit_sum_y) += y;
+              id(pool_fit_sum_y2) += y * y;
+
+              if (id(pool_fit_count) >= 3 && id(pool_fit_sum_t2) > 0.0) {
+                const double slope = id(pool_fit_sum_ty) / id(pool_fit_sum_t2);
+                if (slope < 0.0) {
+                  id(pool_tau_hours_value) = static_cast<float>(-1.0 / slope);
+
+                  const double sse = id(pool_fit_sum_y2)
+                    - 2.0 * slope * id(pool_fit_sum_ty)
+                    + slope * slope * id(pool_fit_sum_t2);
+                  const double sst = id(pool_fit_sum_y2)
+                    - id(pool_fit_sum_y) * id(pool_fit_sum_y)
+                      / static_cast<double>(id(pool_fit_count));
+                  if (sst > 0.0) {
+                    const double quality = 1.0 - sse / sst;
+                    id(pool_fit_quality_value) = static_cast<float>(
+                      std::max(0.0, std::min(1.0, quality)) * 100.0
+                    );
+                  }
+                }
+              }
+            }
+
+            if (x >= id(pool_pressure_before_value)) {
+              id(pool_last_recovery_hours_value) = elapsed_hours;
+              id(pool_recovery_state) = 0;
+            }
+
+  - platform: template
+    name: "Pool Filter Bump Count"
+    icon: "mdi:counter"
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: |-
+      return id(pool_bump_count_value);
+
+  - platform: template
+    name: "Pool Filter Cycle Age"
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: measurement
+    icon: "mdi:calendar-clock"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      auto now = id(pool_ha_time).now();
+      if (!now.is_valid() || id(pool_cycle_started_epoch) == 0) return NAN;
+      return static_cast<float>(now.timestamp - id(pool_cycle_started_epoch)) / 3600.0f;
+
+  - platform: template
+    name: "Pool Filter Pressure Before Bump"
+    unit_of_measurement: "psi"
+    device_class: pressure
+    state_class: measurement
+    icon: "mdi:gauge"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      return id(pool_pressure_before_value) >= 0.0f
+        ? id(pool_pressure_before_value) : NAN;
+
+  - platform: template
+    name: "Pool Filter Pressure After Bump"
+    unit_of_measurement: "psi"
+    device_class: pressure
+    state_class: measurement
+    icon: "mdi:gauge-low"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      return id(pool_pressure_after_value) >= 0.0f
+        ? id(pool_pressure_after_value) : NAN;
+
+  - platform: template
+    name: "Pool Filter Recovery Progress"
+    unit_of_measurement: "%"
+    state_class: measurement
+    icon: "mdi:progress-clock"
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: |-
+      if (id(pool_pressure_before_value) < 0.0f ||
+          id(pool_pressure_after_value) < 0.0f ||
+          !std::isfinite(id(pool_filter_psi).state)) return NAN;
+      const float span =
+        id(pool_pressure_before_value) - id(pool_pressure_after_value);
+      if (span <= 0.0f) return NAN;
+      const float progress =
+        (id(pool_filter_psi).state - id(pool_pressure_after_value)) / span * 100.0f;
+      return std::max(0.0f, std::min(100.0f, progress));
+
+  - platform: template
+    name: "Pool Filter Recovery Elapsed"
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: measurement
+    icon: "mdi:timer-sand"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      auto now = id(pool_ha_time).now();
+      if (!now.is_valid() || id(pool_recovery_state) != 3 ||
+          id(pool_recovery_started_epoch) == 0) return NAN;
+      return static_cast<float>(now.timestamp - id(pool_recovery_started_epoch))
+        / 3600.0f;
+
+  - platform: template
+    name: "Pool Filter Last Recovery Time"
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: measurement
+    icon: "mdi:timer-check-outline"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      return id(pool_last_recovery_hours_value) >= 0.0f
+        ? id(pool_last_recovery_hours_value) : NAN;
+
+  - platform: template
+    name: "Pool Filter Recovery Tau"
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: measurement
+    icon: "mdi:chart-bell-curve-cumulative"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      return id(pool_tau_hours_value) >= 0.0f
+        ? id(pool_tau_hours_value) : NAN;
+
+  - platform: template
+    name: "Pool Filter Model Fit Quality"
+    unit_of_measurement: "%"
+    state_class: measurement
+    icon: "mdi:chart-scatter-plot"
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: |-
+      return id(pool_fit_quality_value) >= 0.0f
+        ? id(pool_fit_quality_value) : NAN;
+
+text_sensor:
+  - platform: template
+    name: "Pool Filter Recovery State"
+    icon: "mdi:pool"
+    update_interval: 30s
+    lambda: |-
+      switch (id(pool_recovery_state)) {
+        case 1: return {"awaiting pump off"};
+        case 2: return {"awaiting restart"};
+        case 3: return {"recovering"};
+        default: return {"normal"};
+
+button:
+  - platform: template
+    name: "Pool Filter Mark Bump"
+    icon: "mdi:filter-cog-outline"
+    on_press:
+      then:
+        - lambda: |-
+            auto now = id(pool_ha_time).now();
+            const float pressure = id(pool_filter_psi).state;
+            if (!now.is_valid() || !std::isfinite(pressure)) {
+              ESP_LOGW("pool_filter", "Cannot mark bump until time and pressure are valid");
+              return;
+            }
+            id(pool_bump_count_value) += 1;
+            if (id(pool_cycle_started_epoch) == 0) {
+              id(pool_cycle_started_epoch) = static_cast<uint32_t>(now.timestamp);
+            }
+            id(pool_pressure_before_value) = pressure;
+            id(pool_pressure_after_value) = -1.0f;
+            id(pool_recovery_started_epoch) = 0;
+            id(pool_last_recovery_hours_value) = -1.0f;
+            id(pool_tau_hours_value) = -1.0f;
+            id(pool_fit_quality_value) = -1.0f;
+            id(pool_fit_count) = 0;
+            id(pool_fit_sum_t2) = 0.0;
+            id(pool_fit_sum_ty) = 0.0;
+            id(pool_fit_sum_y) = 0.0;
+            id(pool_fit_sum_y2) = 0.0;
+            id(pool_recovery_state) =
+              pressure <= ${pool_offline_threshold} ? 2 : 1;
+
+  - platform: template
+    name: "Pool Filter Mark Full Backwash"
+    icon: "mdi:waves-arrow-right"
+    on_press:
+      then:
+        - lambda: |-
+            auto now = id(pool_ha_time).now();
+            if (!now.is_valid()) {
+              ESP_LOGW("pool_filter", "Cannot mark backwash until time is valid");
+              return;
+            }
+            id(pool_recovery_state) = 0;
+            id(pool_bump_count_value) = 0;
+            id(pool_cycle_started_epoch) = static_cast<uint32_t>(now.timestamp);
+            id(pool_recovery_started_epoch) = 0;
+            id(pool_pressure_before_value) = -1.0f;
+            id(pool_pressure_after_value) = -1.0f;
+            id(pool_last_recovery_hours_value) = -1.0f;
+            id(pool_tau_hours_value) = -1.0f;
+            id(pool_fit_quality_value) = -1.0f;
+            id(pool_fit_count) = 0;
+            id(pool_fit_sum_t2) = 0.0;
+            id(pool_fit_sum_ty) = 0.0;
+            id(pool_fit_sum_y) = 0.0;
+            id(pool_fit_sum_y2) = 0.0;

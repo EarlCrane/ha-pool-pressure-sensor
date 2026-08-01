@@ -9,12 +9,16 @@
 substitutions:
   device_name: "pool-pressure-sensor"
   friendly_name: "Pool Pressure Sensor"
-  # Voltage divider ratio: Rbottom / (Rtop + Rbottom)
-  # Default build: 10kΩ top + 26.7kΩ (22kΩ + 4.7kΩ) bottom = 0.727
-  # Recalculate if you used different resistors.
-  divider_ratio: "0.727"
-  update_interval: "2s"
-  history_interval: "60s"
+  pool_sensor_name: "Pool Filter Pressure"
+  pool_history_sensor_name: "Pool Filter Pressure History"
+  pool_divider_ratio: "0.727"
+  pool_update_interval: "2s"
+  pool_history_interval: "60s"
+
+# This local include keeps the standalone example and the reusable package on
+# exactly the same firmware logic when the repository is cloned.
+packages:
+  pool_sensor: !include ../esphome/pool_pressure_sensor.yaml
 
 esphome:
   name: ${device_name}
@@ -50,62 +54,6 @@ wifi:
     password: !secret ap_password
 
 captive_portal:
-
-# -------------------------
-# I2C Bus (ESP32 default pins)
-# -------------------------
-i2c:
-  sda: 21
-  scl: 22
-  scan: true
-
-# -------------------------
-# ADS1115 16-bit ADC
-# -------------------------
-ads1115:
-  - id: ads_hub
-    address: 0x48
-    continuous_mode: true
-
-sensor:
-  # Raw ADC voltage — kept internal, used by PSI template below
-  - platform: ads1115
-    ads1115_id: ads_hub
-    multiplexer: A0_GND
-    gain: 4.096
-    update_interval: ${update_interval}
-    name: "${friendly_name} ADC Volts"
-    unit_of_measurement: "V"
-    id: pool_adc_v
-    internal: true
-
-  # Converted PSI published to Home Assistant
-  - platform: template
-    name: "${friendly_name}"
-    id: pool_filter_psi
-    unit_of_measurement: "psi"
-    icon: "mdi:gauge"
-    accuracy_decimals: 1
-    update_interval: ${update_interval}
-    lambda: |-
-      float v_adc = id(pool_adc_v).state;
-      float divider = ${divider_ratio};  // Rbottom / (Rtop + Rbottom)
-      float v_sensor = v_adc / divider;  // Undo voltage divider
-      float psi = (v_sensor - 0.5) * 15.0;  // Sensor: 0.5V=0psi, slope=15psi/V
-      if (psi < 0) psi = 0;
-      return psi;
-
-  # Recorder-friendly history sensor for Pool Filter Analytics.
-  - platform: template
-    name: "${friendly_name} History"
-    unit_of_measurement: "psi"
-    icon: "mdi:gauge"
-    accuracy_decimals: 1
-    update_interval: ${update_interval}
-    filters:
-      - throttle_average: ${history_interval}
-    lambda: |-
-      return id(pool_filter_psi).state;
 
 # -------------------------
 # Recovery Buttons
