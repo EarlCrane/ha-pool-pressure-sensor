@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -41,10 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -53,8 +53,8 @@ jobs:
 
       - name: Create validation secrets
         run: |
-          cp secrets.yaml.example secrets.yaml
-          sed -i 's/base64encodedkeyhere=/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=/' secrets.yaml
+          cp secrets.yaml.example examples/secrets.yaml
+          sed -i 's/base64encodedkeyhere=/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=/' examples/secrets.yaml
 
       - name: Validate standalone configuration
         run: esphome config examples/esp32-devkitv1.yaml
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Validate integration
         uses: home-assistant/actions/hassfest@master
 
