@@ -369,6 +369,7 @@ text_sensor:
         case 2: return {"awaiting restart"};
         case 3: return {"recovering"};
         default: return {"normal"};
+      }
 
 button:
   - platform: template
