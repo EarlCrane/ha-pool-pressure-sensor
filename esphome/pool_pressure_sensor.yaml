@@ -70,6 +70,8 @@ sensor:
   - platform: template
     name: ${pool_history_sensor_name}
     unit_of_measurement: "psi"
+    device_class: pressure
+    state_class: measurement
     icon: "mdi:gauge"
     accuracy_decimals: 1
     update_interval: ${pool_update_interval}
