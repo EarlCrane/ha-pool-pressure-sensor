@@ -22,6 +22,7 @@ This is also the first time I've ever really pulled together an ESP32 and breadb
 - Uses ADS1115 16-bit ADC for stable, accurate readings
 - Voltage divider safely scales 5V sensor signal to 3.3V ADC range
 - Publishes live PSI to Home Assistant every 2 seconds
+- Includes an optional Home Assistant integration for bump recovery analytics
 - Compatible with ESPHome 2026.x and later
 - Available as a standalone config or importable ESPHome package
 
@@ -199,6 +200,55 @@ automation:
         data:
           message: "Pool filter pressure is high — time to backwash!"
 ```
+
+### Pool Filter Analytics
+
+The repository also includes `custom_components/pool_filter_analytics`, an
+optional Home Assistant integration that turns the pressure history sensor into
+stateful filter-cycle measurements. It deliberately begins with manually marked
+events so the hydraulic model can be validated against real maintenance before
+automatic classification is added.
+
+The integration provides:
+
+- Filter state: `normal`, `awaiting_restart`, or `recovering`
+- Bump count and filter-cycle age
+- Pressure immediately before and after a bump
+- Live recovery progress and elapsed recovery time
+- Completed time to return to the pre-bump pressure
+- Exponential recovery time constant (τ) and model fit quality
+- **Mark bump** and **Mark full backwash** buttons
+
+#### Install
+
+1. Copy `custom_components/pool_filter_analytics` into Home Assistant's
+   `/config/custom_components/` directory, or add this repository as a custom
+   integration repository in HACS.
+2. Restart Home Assistant.
+3. Go to **Settings → Devices & services → Add integration** and choose
+   **Pool Filter Analytics**.
+4. Select the one-minute **Pool Filter Pressure History** sensor. The fast
+   two-second sensor should remain excluded from Recorder.
+
+#### Record a bump
+
+1. While the pump is running normally, press **Mark bump** before switching it
+   off. This captures the comparable pre-bump pressure.
+2. Perform the bump normally. The integration waits until it observes pressure
+   at or below the configured pump-off threshold.
+3. When filtration restarts at a lower pressure, recovery tracking starts.
+4. Press **Mark full backwash** after a complete backwash/DE recharge to reset
+   the bump count and begin a new filter cycle.
+
+The τ model fixes the asymptote at the pre-bump pressure:
+
+```text
+P(t) = P_before - (P_before - P_after) × exp(-t / τ)
+```
+
+A falling τ or shrinking completed recovery time over successive bumps can show
+diminishing bump effectiveness. Pump speed and valve position are not yet inputs,
+so compare events only when filtration returns to the same hydraulic mode.
 
 ---
 

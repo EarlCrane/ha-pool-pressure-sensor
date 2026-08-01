@@ -5,6 +5,11 @@
 build/
 .claude
 
+# Python test/build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Secrets — never commit these
 secrets.yaml
 

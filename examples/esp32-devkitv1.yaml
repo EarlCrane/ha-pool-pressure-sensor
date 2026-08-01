@@ -14,6 +14,7 @@ substitutions:
   # Recalculate if you used different resistors.
   divider_ratio: "0.727"
   update_interval: "2s"
+  history_interval: "60s"
 
 esphome:
   name: ${device_name}
@@ -81,6 +82,7 @@ sensor:
   # Converted PSI published to Home Assistant
   - platform: template
     name: "${friendly_name}"
+    id: pool_filter_psi
     unit_of_measurement: "psi"
     icon: "mdi:gauge"
     accuracy_decimals: 1
@@ -92,6 +94,18 @@ sensor:
       float psi = (v_sensor - 0.5) * 15.0;  // Sensor: 0.5V=0psi, slope=15psi/V
       if (psi < 0) psi = 0;
       return psi;
+
+  # Recorder-friendly history sensor for Pool Filter Analytics.
+  - platform: template
+    name: "${friendly_name} History"
+    unit_of_measurement: "psi"
+    icon: "mdi:gauge"
+    accuracy_decimals: 1
+    update_interval: ${update_interval}
+    filters:
+      - throttle_average: ${history_interval}
+    lambda: |-
+      return id(pool_filter_psi).state;
 
 # -------------------------
 # Recovery Buttons
