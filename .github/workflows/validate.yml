@@ -31,5 +31,5 @@ jobs:
           cp secrets.yaml.example examples/secrets.yaml
           sed -i 's/base64encodedkeyhere=/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=/' examples/secrets.yaml
 
-      - name: Validate standalone configuration
-        run: esphome config examples/esp32-devkitv1.yaml
+      - name: Compile standalone firmware
+        run: esphome compile examples/esp32-devkitv1.yaml
