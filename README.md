@@ -22,6 +22,7 @@ This is also the first time I've ever really pulled together an ESP32 and breadb
 - Uses ADS1115 16-bit ADC for stable, accurate readings
 - Voltage divider safely scales 5V sensor signal to 3.3V ADC range
 - Publishes live PSI to Home Assistant every 2 seconds
+- Publishes a one-minute averaged history sensor with Home Assistant long-term statistics
 - Publishes a one-minute averaged sensor for year-plus Home Assistant trends
 - Runs bump/backwash recovery analytics directly on the ESP32
 - Compatible with ESPHome 2026.x and later
@@ -187,6 +188,10 @@ To verify: watch the raw ADC voltage reading in ESPHome logs. At a known pressur
 After flashing, the device will appear in HA's **ESPHome integration** automatically. You'll get:
 
 - **Pool Filter Pressure** — live PSI value, updates every 2 seconds
+- **Pool Filter Pressure History** — one-minute averaged PSI value with `device_class: pressure` and `state_class: measurement` so Home Assistant retains compact long-term statistics indefinitely
+- **Safe Mode** and **Factory Reset** buttons for recovery
+
+The live two-second sensor should normally be excluded from Recorder. Record the one-minute history sensor instead. Home Assistant's raw Recorder retention is configured separately with `recorder.purge_keep_days`; long-term statistics continue beyond that raw-history window.
 - **Pool Filter Pressure History** — one-minute average used for long-term trends
 - Filter-cycle state, bump count, cycle age, pre/post-bump pressure, recovery progress/time, recovery tau, and fit quality
 - **Mark Bump** and **Mark Full Backwash** buttons
