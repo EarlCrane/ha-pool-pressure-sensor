@@ -23,6 +23,8 @@ This is also the first time I've ever really pulled together an ESP32 and breadb
 - Voltage divider safely scales 5V sensor signal to 3.3V ADC range
 - Publishes live PSI to Home Assistant every 2 seconds
 - Publishes a one-minute averaged history sensor with Home Assistant long-term statistics
+- Publishes a one-minute averaged sensor for year-plus Home Assistant trends
+- Runs bump/backwash recovery analytics directly on the ESP32
 - Compatible with ESPHome 2026.x and later
 - Available as a standalone config or importable ESPHome package
 
@@ -134,8 +136,8 @@ The firmware:
 
 ### Option A — Standalone (easiest)
 
-1. Copy `examples/esp32-devkitv1.yaml` to your ESPHome config directory
-2. Copy `secrets.yaml.example` to `secrets.yaml` and fill in your credentials
+1. Clone or download this repository
+2. Copy `secrets.yaml.example` to `examples/secrets.yaml` and fill in your credentials
 3. Flash via USB: `esphome run examples/esp32-devkitv1.yaml`
 4. Future updates work over OTA
 
@@ -155,6 +157,8 @@ substitutions:
   pool_sensor_name: "Spa Filter Pressure"  # rename the HA entity
   pool_divider_ratio: "0.730"              # if you used a 27kΩ resistor instead
   pool_update_interval: "5s"              # slow down polling
+  pool_offline_threshold: "2.0"            # pump-off PSI threshold
+  pool_minimum_bump_drop: "0.5"            # required post-bump pressure drop
 ```
 
 > **Note:** The package defines an `i2c:` bus on GPIO 21/22. If your node already defines I²C for other devices, remove the `i2c:` block from this package or merge the pin definitions manually.
@@ -188,6 +192,19 @@ After flashing, the device will appear in HA's **ESPHome integration** automatic
 - **Safe Mode** and **Factory Reset** buttons for recovery
 
 The live two-second sensor should normally be excluded from Recorder. Record the one-minute history sensor instead. Home Assistant's raw Recorder retention is configured separately with `recorder.purge_keep_days`; long-term statistics continue beyond that raw-history window.
+- **Pool Filter Pressure History** — one-minute average used for long-term trends
+- Filter-cycle state, bump count, cycle age, pre/post-bump pressure, recovery progress/time, recovery tau, and fit quality
+- **Mark Bump** and **Mark Full Backwash** buttons
+- **Safe Mode** and **Factory Reset** buttons for recovery
+
+The history sensor advertises `device_class: pressure` and
+`state_class: measurement`. Home Assistant therefore generates compact hourly
+long-term statistics that are retained for a year and beyond. The ESP32 does
+not store a year of raw readings itself. Home Assistant's raw, minute-by-minute
+Recorder retention remains controlled separately by `recorder.purge_keep_days`.
+
+Normally, exclude the live two-second sensor from Recorder and record the
+one-minute history sensor instead.
 
 Create an automation to alert when pressure rises above your threshold:
 
@@ -203,6 +220,49 @@ automation:
         data:
           message: "Pool filter pressure is high — time to backwash!"
 ```
+
+### Pool Filter Analytics
+
+<img src="images/pool-pressure-icon.png" alt="Pool pressure analytics icon" width="128">
+
+The ESPHome package performs filter-cycle analytics directly on the ESP32. No
+HACS repository, custom Home Assistant integration, or HAOS file deployment is
+required. The small set of model variables is persisted across device restarts;
+pressure history remains in Home Assistant.
+
+The firmware provides:
+
+- Filter state: `normal`, `awaiting_restart`, or `recovering`
+- Bump count and filter-cycle age
+- Pressure immediately before and after a bump
+- Live recovery progress and elapsed recovery time
+- Completed time to return to the pre-bump pressure
+- Exponential recovery time constant (τ) and model fit quality
+- **Mark bump** and **Mark full backwash** buttons
+
+#### Record a bump
+
+1. While the pump is running normally, press **Mark bump** before switching it
+   off. This captures the comparable pre-bump pressure.
+2. Perform the bump normally. The integration waits until it observes pressure
+   at or below the configured pump-off threshold.
+3. When filtration restarts at a lower pressure, recovery tracking starts.
+4. Press **Mark full backwash** after a complete backwash/DE recharge to reset
+   the bump count and begin a new filter cycle.
+
+The τ model fixes the asymptote at the pre-bump pressure:
+
+```text
+P(t) = P_before - (P_before - P_after) × exp(-t / τ)
+```
+
+A falling τ or shrinking completed recovery time over successive bumps can show
+diminishing bump effectiveness. Pump speed and valve position are not yet inputs,
+so compare events only when filtration returns to the same hydraulic mode.
+
+The model is fitted incrementally from running sums. This avoids keeping a long
+sample log in ESP32 memory while producing the same exponential time-constant
+measurement.
 
 ---
 
